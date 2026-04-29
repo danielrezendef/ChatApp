@@ -1,0 +1,15 @@
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = [
+  "npm run db:generate --workspace=server",
+  "npm run build --workspace=client",
+  "npm run build --workspace=server"
+]
+
+[start]
+cmd = "cd server && npx prisma migrate deploy && node dist/index.js"
