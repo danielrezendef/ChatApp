@@ -4,7 +4,8 @@ import { api } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 
 interface LoginResponse {
-  token: string;
+  accessToken: string;
+  refreshToken: string;
   user: { id: string; email: string; createdAt: string };
 }
 
@@ -22,7 +23,7 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await api.post<LoginResponse>('/api/auth/login', { email, password });
-      login(res.token, res.user);
+      login(res.accessToken, res.user, res.refreshToken);
       navigate('/');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro ao fazer login');
