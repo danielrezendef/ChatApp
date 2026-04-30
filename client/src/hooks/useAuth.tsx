@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { api } from '../lib/api';
+import { api, getAccessToken, setTokens, clearTokens } from '../lib/api';
 
 interface User {
   id: string;
@@ -10,7 +10,7 @@ interface User {
 interface AuthCtx {
   user: User | null;
   token: string | null;
-  login: (token: string, user: User) => void;
+  login: (accessToken: string, user: User, refreshToken?: string) => void;
   logout: () => void;
   loading: boolean;
 }
@@ -23,26 +23,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem('token');
+    const stored = getAccessToken();
     if (stored) {
       setToken(stored);
       api.get<User>('/api/users/me')
-        .then(u => { setUser(u); })
-        .catch(() => { localStorage.removeItem('token'); })
+        .then(u => setUser(u))
+        .catch(() => {
+          clearTokens();
+          setToken(null);
+          setUser(null);
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
   }, []);
 
-  const login = (t: string, u: User) => {
-    localStorage.setItem('token', t);
-    setToken(t);
+  const login = (accessToken: string, u: User, refreshToken?: string) => {
+    setTokens(accessToken, refreshToken);
+    setToken(accessToken);
     setUser(u);
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
+    clearTokens();
     setToken(null);
     setUser(null);
   };
