@@ -29,6 +29,27 @@ messagesRouter.get('/:otherUserId', async (req: AuthRequest, res: Response): Pro
   }
 });
 
+messagesRouter.delete('/:otherUserId', async (req: AuthRequest, res: Response): Promise<void> => {
+  const { otherUserId } = req.params;
+  const userId = req.userId!;
+
+  try {
+    await prisma.message.deleteMany({
+      where: {
+        OR: [
+          { senderId: userId, receiverId: otherUserId },
+          { senderId: otherUserId, receiverId: userId },
+        ],
+      },
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
 const sendSchema = z.object({
   receiverId: z.string().min(1),
   content: z.string().min(1).max(5000),
