@@ -6,79 +6,50 @@ import { prisma } from '../lib/prisma';
 
 export const authRouter = Router();
 
-const registerSchema = z.object({
-  email: z.string().email('E-mail inválido'),
-  password: z.string().min(6, 'Senha deve ter no mínimo 6 caracteres'),
+const ACCESS_EXPIRES = '15m';
+const REFRESH_EXPIRES = '30d';
+
+function generateTokens(userId: string) {
+  const secret = process.env.JWT_SECRET!;
+  const accessToken = jwt.sign({ userId }, secret, { expiresIn: ACCESS_EXPIRES });
+  const refreshToken = jwt.sign({ userId }, secret, { expiresIn: REFRESH_EXPIRES });
+  return { accessToken, refreshToken };
+}
+
+const schema = z.object({ email: z.string().email(), password: z.string().min(6) });
+
+authRouter.post('/register', async (req: Request, res: Response) => {
+  const { email, password } = schema.parse(req.body);
+
+  const hash = await bcrypt.hash(password, 12);
+  const user = await prisma.user.create({ data: { email, passwordHash: hash } });
+
+  const tokens = generateTokens(user.id);
+  res.json({ ...tokens, user });
 });
 
-const loginSchema = z.object({
-  email: z.string().email('E-mail inválido'),
-  password: z.string().min(1, 'Senha obrigatória'),
+authRouter.post('/login', async (req: Request, res: Response) => {
+  const { email, password } = schema.parse(req.body);
+
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) return res.status(401).json({ error: 'Credenciais inválidas' });
+
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) return res.status(401).json({ error: 'Credenciais inválidas' });
+
+  const tokens = generateTokens(user.id);
+  res.json({ ...tokens, user });
 });
 
-authRouter.post('/register', async (req: Request, res: Response): Promise<void> => {
-  const parsed = registerSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.errors[0].message });
-    return;
-  }
-
-  const { email, password } = parsed.data;
+authRouter.post('/refresh', async (req: Request, res: Response) => {
+  const { refreshToken } = req.body;
+  const secret = process.env.JWT_SECRET!;
 
   try {
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      res.status(409).json({ error: 'E-mail já cadastrado' });
-      return;
-    }
-
-    const passwordHash = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: { email, passwordHash },
-      select: { id: true, email: true, createdAt: true },
-    });
-
-    const secret = process.env.JWT_SECRET!;
-    const token = jwt.sign({ userId: user.id }, secret, { expiresIn: '7d' });
-
-    res.status(201).json({ token, user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erro interno' });
-  }
-});
-
-authRouter.post('/login', async (req: Request, res: Response): Promise<void> => {
-  const parsed = loginSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.errors[0].message });
-    return;
-  }
-
-  const { email, password } = parsed.data;
-
-  try {
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      res.status(401).json({ error: 'Credenciais inválidas' });
-      return;
-    }
-
-    const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) {
-      res.status(401).json({ error: 'Credenciais inválidas' });
-      return;
-    }
-
-    const secret = process.env.JWT_SECRET!;
-    const token = jwt.sign({ userId: user.id }, secret, { expiresIn: '7d' });
-
-    res.json({
-      token,
-      user: { id: user.id, email: user.email, createdAt: user.createdAt },
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erro interno' });
+    const payload = jwt.verify(refreshToken, secret) as { userId: string };
+    const tokens = generateTokens(payload.userId);
+    res.json(tokens);
+  } catch {
+    res.status(401).json({ error: 'Refresh inválido' });
   }
 });
