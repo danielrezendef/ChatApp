@@ -19,6 +19,8 @@ interface Message {
 
 type UnreadMap = Record<string, number>;
 
+const EMOJIS = ['😀', '😂', '😍', '😎', '😭', '😡', '🙏', '👏', '🔥', '❤️', '👍', '👎', '🎉', '💪', '🤝', '✅', '⚠️', '💬'];
+
 function getInitials(email: string) {
   return email.slice(0, 2).toUpperCase();
 }
@@ -48,6 +50,7 @@ export default function Chat() {
   const [online, setOnline] = useState<string[]>([]);
   const [typingFrom, setTypingFrom] = useState<string | null>(null);
   const [unread, setUnread] = useState<UnreadMap>({});
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -70,6 +73,11 @@ export default function Chat() {
 
   useEffect(() => {
     const handleEsc = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && showEmojiPicker) {
+        setShowEmojiPicker(false);
+        return;
+      }
+
       if (event.key === 'Escape' && selectedRef.current) {
         setSelected(null);
         setTypingFrom(null);
@@ -78,7 +86,7 @@ export default function Chat() {
 
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+  }, [showEmojiPicker]);
 
   useEffect(() => {
     if (!token) return;
@@ -167,6 +175,7 @@ export default function Chat() {
     setLoadingMsgs(true);
     setTypingFrom(null);
     setUnread(prev => ({ ...prev, [selected.id]: 0 }));
+    setShowEmojiPicker(false);
 
     api.get<Message[]>(`/api/messages/${selected.id}`)
       .then(data => {
@@ -204,6 +213,25 @@ export default function Chat() {
     }
   };
 
+  const emitTyping = () => {
+    if (!selected || !token) return;
+
+    const socket = getSocket(token);
+    socket.emit('typing', { to: selected.id });
+
+    if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = window.setTimeout(() => {
+      socket.emit('stop_typing', { to: selected.id });
+    }, 900);
+  };
+
+  const addEmoji = (emoji: string) => {
+    setInput(prev => `${prev}${emoji}`);
+    setShowEmojiPicker(false);
+    textareaRef.current?.focus();
+    emitTyping();
+  };
+
   const sendMessage = useCallback(() => {
     const content = input.trim();
     if (!content || !selected || !token) return;
@@ -213,6 +241,7 @@ export default function Chat() {
     socket.emit('stop_typing', { to: selected.id });
 
     setInput('');
+    setShowEmojiPicker(false);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }, [input, selected, token]);
 
@@ -227,16 +256,7 @@ export default function Chat() {
     setInput(e.target.value);
     e.target.style.height = 'auto';
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-
-    if (!selected || !token) return;
-
-    const socket = getSocket(token);
-    socket.emit('typing', { to: selected.id });
-
-    if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = window.setTimeout(() => {
-      socket.emit('stop_typing', { to: selected.id });
-    }, 900);
+    emitTyping();
   };
 
   const messagesByDate: { date: string; messages: Message[] }[] = [];
@@ -382,6 +402,27 @@ export default function Chat() {
             </div>
 
             <div className="chat-input-area">
+              <div className="emoji-wrapper">
+                <button
+                  type="button"
+                  className="btn-emoji"
+                  onClick={() => setShowEmojiPicker(prev => !prev)}
+                  title="Emojis"
+                >
+                  🙂
+                </button>
+
+                {showEmojiPicker && (
+                  <div className="emoji-picker">
+                    {EMOJIS.map(emoji => (
+                      <button key={emoji} type="button" onClick={() => addEmoji(emoji)}>
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <textarea
                 ref={textareaRef}
                 className="chat-input"
