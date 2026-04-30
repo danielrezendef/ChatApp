@@ -11,6 +11,13 @@ const onlineUsers = new Map<string, Set<string>>();
 const disconnectTimers = new Map<string, NodeJS.Timeout>();
 const DISCONNECT_DELAY_MS = 5000;
 
+async function setLastSeen(userId: string) {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { lastSeenAt: new Date() },
+  }).catch(() => {});
+}
+
 function getOnlineUserIds() {
   return Array.from(onlineUsers.keys());
 }
@@ -41,19 +48,17 @@ function removeUserConnection(userId: string, socketId: string, io: Server) {
 
   connections.delete(socketId);
 
-  if (connections.size > 0) {
-    onlineUsers.set(userId, connections);
-    return;
-  }
+  if (connections.size > 0) return;
 
   onlineUsers.delete(userId);
 
-  const timer = setTimeout(() => {
+  const timer = setTimeout(async () => {
     disconnectTimers.delete(userId);
 
     const currentConnections = onlineUsers.get(userId);
     if (currentConnections && currentConnections.size > 0) return;
 
+    await setLastSeen(userId);
     emitPresence(io);
   }, DISCONNECT_DELAY_MS);
 
