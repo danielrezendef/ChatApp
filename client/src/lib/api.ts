@@ -1,5 +1,17 @@
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
+type TokenListener = (accessToken: string | null) => void;
+const tokenListeners = new Set<TokenListener>();
+
+function notifyTokenChange(accessToken: string | null) {
+  tokenListeners.forEach(listener => listener(accessToken));
+}
+
+export function subscribeTokenChange(listener: TokenListener) {
+  tokenListeners.add(listener);
+  return () => tokenListeners.delete(listener);
+}
+
 export function getAccessToken() {
   return sessionStorage.getItem('accessToken') || sessionStorage.getItem('token');
 }
@@ -12,6 +24,7 @@ export function setTokens(accessToken: string, refreshToken?: string) {
   sessionStorage.setItem('accessToken', accessToken);
   sessionStorage.setItem('token', accessToken);
   if (refreshToken) sessionStorage.setItem('refreshToken', refreshToken);
+  notifyTokenChange(accessToken);
 }
 
 export function clearTokens() {
@@ -21,6 +34,7 @@ export function clearTokens() {
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
   localStorage.removeItem('token');
+  notifyTokenChange(null);
 }
 
 async function refreshAccessToken(): Promise<string | null> {
