@@ -7,7 +7,58 @@ interface AuthSocket extends Socket {
   userId?: string;
 }
 
-const onlineUsers = new Set<string>();
+const onlineUsers = new Map<string, Set<string>>();
+const disconnectTimers = new Map<string, NodeJS.Timeout>();
+const DISCONNECT_DELAY_MS = 5000;
+
+function getOnlineUserIds() {
+  return Array.from(onlineUsers.keys());
+}
+
+function emitPresence(io: Server) {
+  io.emit('presence', getOnlineUserIds());
+}
+
+function addUserConnection(userId: string, socketId: string, io: Server) {
+  const pendingTimer = disconnectTimers.get(userId);
+  if (pendingTimer) {
+    clearTimeout(pendingTimer);
+    disconnectTimers.delete(userId);
+  }
+
+  const connections = onlineUsers.get(userId) || new Set<string>();
+  const wasOffline = connections.size === 0;
+
+  connections.add(socketId);
+  onlineUsers.set(userId, connections);
+
+  if (wasOffline) emitPresence(io);
+}
+
+function removeUserConnection(userId: string, socketId: string, io: Server) {
+  const connections = onlineUsers.get(userId);
+  if (!connections) return;
+
+  connections.delete(socketId);
+
+  if (connections.size > 0) {
+    onlineUsers.set(userId, connections);
+    return;
+  }
+
+  onlineUsers.delete(userId);
+
+  const timer = setTimeout(() => {
+    disconnectTimers.delete(userId);
+
+    const currentConnections = onlineUsers.get(userId);
+    if (currentConnections && currentConnections.size > 0) return;
+
+    emitPresence(io);
+  }, DISCONNECT_DELAY_MS);
+
+  disconnectTimers.set(userId, timer);
+}
 
 export function setupSocket(io: Server) {
   io.use((socket: AuthSocket, next) => {
@@ -28,8 +79,8 @@ export function setupSocket(io: Server) {
   io.on('connection', (socket: AuthSocket) => {
     const userId = socket.userId!;
 
-    onlineUsers.add(userId);
-    io.emit('presence', Array.from(onlineUsers));
+    addUserConnection(userId, socket.id, io);
+    socket.emit('presence', getOnlineUserIds());
 
     socket.join(`user:${userId}`);
 
@@ -65,8 +116,7 @@ export function setupSocket(io: Server) {
     });
 
     socket.on('disconnect', () => {
-      onlineUsers.delete(userId);
-      io.emit('presence', Array.from(onlineUsers));
+      removeUserConnection(userId, socket.id, io);
     });
   });
 }
