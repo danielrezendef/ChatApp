@@ -8,31 +8,34 @@ import { authRouter } from './routes/auth';
 import { usersRouter } from './routes/users';
 import { messagesRouter } from './routes/messages';
 import { setupSocket } from './lib/socket';
+import { prisma } from './lib/prisma';
+import { validateEnv } from './lib/env';
+
+validateEnv();
 
 const app = express();
 const httpServer = createServer(app);
 
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
-
 const io = new Server(httpServer, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
-  },
+  cors: { origin: '*', methods: ['GET', 'POST'] },
 });
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Health check
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/health', async (_req, res) => {
+  try {
+    await prisma.$queryRawUnsafe('SELECT 1');
+    res.json({ ok: true, db: true });
+  } catch {
+    res.status(500).json({ ok: false, db: false });
+  }
+});
 
-// API routes
 app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/messages', messagesRouter);
 
-// Serve built frontend in production
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.join(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
@@ -41,11 +44,29 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Socket.IO setup
 setupSocket(io);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+const server = httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log('Server running on port ' + PORT);
+});
+
+const shutdown = async () => {
+  console.log('Shutting down server...');
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+};
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+process.on('uncaughtException', err => {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', err => {
+  console.error('Unhandled Rejection:', err);
 });
