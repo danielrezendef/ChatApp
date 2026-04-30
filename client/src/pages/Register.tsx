@@ -4,7 +4,8 @@ import { api } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 
 interface RegisterResponse {
-  token: string;
+  accessToken: string;
+  refreshToken: string;
   user: { id: string; email: string; createdAt: string };
 }
 
@@ -33,7 +34,7 @@ export default function Register() {
     setLoading(true);
     try {
       const res = await api.post<RegisterResponse>('/api/auth/register', { email, password });
-      login(res.token, res.user);
+      login(res.accessToken, res.user, res.refreshToken);
       navigate('/');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro ao criar conta');
