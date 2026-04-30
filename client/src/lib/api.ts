@@ -9,7 +9,9 @@ function notifyTokenChange(accessToken: string | null) {
 
 export function subscribeTokenChange(listener: TokenListener) {
   tokenListeners.add(listener);
-  return () => tokenListeners.delete(listener);
+  return () => {
+    tokenListeners.delete(listener);
+  };
 }
 
 export function getAccessToken() {
