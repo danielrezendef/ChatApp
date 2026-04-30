@@ -21,9 +21,10 @@ model User {
 }
 
 model Message {
-  id         String   @id @default(cuid())
-  content    String   @db.Text
-  createdAt  DateTime @default(now())
+  id        String    @id @default(cuid())
+  content   String    @db.Text
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
 
   senderId   String
   receiverId String
@@ -33,4 +34,5 @@ model Message {
 
   @@index([senderId, receiverId])
   @@index([createdAt])
+  @@index([readAt])
 }
