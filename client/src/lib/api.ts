@@ -1,20 +1,23 @@
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export function getAccessToken() {
-  return localStorage.getItem('accessToken') || localStorage.getItem('token');
+  return sessionStorage.getItem('accessToken') || sessionStorage.getItem('token');
 }
 
 export function getRefreshToken() {
-  return localStorage.getItem('refreshToken');
+  return sessionStorage.getItem('refreshToken');
 }
 
 export function setTokens(accessToken: string, refreshToken?: string) {
-  localStorage.setItem('accessToken', accessToken);
-  localStorage.setItem('token', accessToken);
-  if (refreshToken) localStorage.setItem('refreshToken', refreshToken);
+  sessionStorage.setItem('accessToken', accessToken);
+  sessionStorage.setItem('token', accessToken);
+  if (refreshToken) sessionStorage.setItem('refreshToken', refreshToken);
 }
 
 export function clearTokens() {
+  sessionStorage.removeItem('accessToken');
+  sessionStorage.removeItem('refreshToken');
+  sessionStorage.removeItem('token');
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
   localStorage.removeItem('token');
@@ -57,10 +60,7 @@ async function request<T>(path: string, options?: RequestInit, retry = true): Pr
 
   const data = await res.json().catch(() => ({}));
 
-  if (!res.ok) {
-    throw new Error(data.error || 'Erro desconhecido');
-  }
-
+  if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
   return data as T;
 }
 
