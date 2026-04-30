@@ -17,6 +17,8 @@ interface Message {
   readAt?: string | null;
 }
 
+type UnreadMap = Record<string, number>;
+
 function getInitials(email: string) {
   return email.slice(0, 2).toUpperCase();
 }
@@ -45,6 +47,7 @@ export default function Chat() {
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [online, setOnline] = useState<string[]>([]);
   const [typingFrom, setTypingFrom] = useState<string | null>(null);
+  const [unread, setUnread] = useState<UnreadMap>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -54,6 +57,12 @@ export default function Chat() {
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
+
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => undefined);
+    }
+  }, []);
 
   useEffect(() => {
     api.get<User[]>('/api/users').then(setUsers).catch(console.error);
@@ -103,8 +112,31 @@ export default function Chat() {
       });
 
       const current = selectedRef.current;
-      if (current && msg.senderId === current.id) {
+      const isIncoming = msg.receiverId === user?.id && msg.senderId !== user?.id;
+      const isCurrentConversation = current?.id === msg.senderId;
+
+      if (current && isCurrentConversation) {
         socket.emit('read_messages', { from: current.id });
+        setUnread(prev => ({ ...prev, [current.id]: 0 }));
+        return;
+      }
+
+      if (isIncoming) {
+        setUnread(prev => ({
+          ...prev,
+          [msg.senderId]: (prev[msg.senderId] || 0) + 1,
+        }));
+
+        const sender = users.find(u => u.id === msg.senderId);
+        const senderLabel = sender?.email || 'Nova mensagem';
+
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification(senderLabel, {
+            body: msg.content,
+            tag: `chat-${msg.senderId}`,
+            silent: false,
+          });
+        }
       }
     };
 
@@ -121,7 +153,7 @@ export default function Chat() {
       socket.off('messages_read', onMessagesRead);
       socket.off('new_message', onNewMessage);
     };
-  }, [token, user?.id]);
+  }, [token, user?.id, users]);
 
   useEffect(() => {
     return () => {
@@ -134,6 +166,7 @@ export default function Chat() {
 
     setLoadingMsgs(true);
     setTypingFrom(null);
+    setUnread(prev => ({ ...prev, [selected.id]: 0 }));
 
     api.get<Message[]>(`/api/messages/${selected.id}`)
       .then(data => {
@@ -155,6 +188,7 @@ export default function Chat() {
 
     try {
       await api.delete<{ ok: boolean }>(`/api/messages/${selected.id}`);
+      setUnread(prev => ({ ...prev, [selected.id]: 0 }));
       setMessages(prev =>
         prev.filter(
           m =>
@@ -251,10 +285,12 @@ export default function Chat() {
 
           {users.map(u => {
             const isOnline = online.includes(u.id);
+            const unreadCount = unread[u.id] || 0;
+
             return (
               <div
                 key={u.id}
-                className={`user-item ${selected?.id === u.id ? 'active' : ''}`}
+                className={`user-item ${selected?.id === u.id ? 'active' : ''} ${unreadCount > 0 ? 'has-unread' : ''}`}
                 onClick={() => setSelected(u)}
               >
                 <div className="avatar avatar-sm avatar-wrap">
@@ -263,8 +299,9 @@ export default function Chat() {
                 </div>
                 <div className="user-item-info">
                   <div className="user-item-email">{u.email}</div>
-                  <div className="user-item-status">{isOnline ? 'online' : 'offline'}</div>
+                  <div className="user-item-status">{unreadCount > 0 ? 'nova mensagem' : isOnline ? 'online' : 'offline'}</div>
                 </div>
+                {unreadCount > 0 && <span className="unread-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
               </div>
             );
           })}
