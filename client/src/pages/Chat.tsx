@@ -60,6 +60,18 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
+    const handleEsc = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && selectedRef.current) {
+        setSelected(null);
+        setTypingFrom(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+
+  useEffect(() => {
     if (!token) return;
 
     const socket = getSocket(token);
