@@ -1,0 +1,240 @@
+/* Premium motion layer */
+:root {
+  --ease-premium: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.chat-area.mobile-active,
+.chat-area {
+  animation: chatFadeIn 220ms var(--ease-premium);
+}
+
+@keyframes chatFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.user-item {
+  position: relative;
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+.user-item::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.035), transparent);
+  transform: translateX(-120%);
+  transition: transform 520ms var(--ease-premium);
+  pointer-events: none;
+}
+
+.user-item:hover::after {
+  transform: translateX(120%);
+}
+
+.user-item,
+.btn-send,
+.btn-clear-chat,
+.btn-back-mobile,
+.btn-logout {
+  will-change: transform;
+}
+
+.user-item:hover {
+  transform: translateX(2px);
+}
+
+.user-item:active,
+.btn-send:active,
+.btn-clear-chat:active,
+.btn-back-mobile:active,
+.btn-logout:active {
+  transform: scale(0.96);
+}
+
+.msg-wrapper {
+  animation: messageIn 180ms var(--ease-premium);
+}
+
+.msg-wrapper.mine {
+  transform-origin: right bottom;
+}
+
+.msg-wrapper.theirs {
+  transform-origin: left bottom;
+}
+
+@keyframes messageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.975);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.msg-bubble {
+  transition: transform 140ms var(--ease-premium), box-shadow 140ms var(--ease-premium), border-color 140ms var(--ease-premium);
+}
+
+.msg-bubble:hover {
+  transform: translateY(-1px);
+}
+
+.msg-wrapper.mine .msg-bubble:hover {
+  box-shadow: 0 12px 30px rgba(124, 106, 247, 0.18);
+}
+
+.msg-wrapper.theirs .msg-bubble:hover {
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  border-color: rgba(255,255,255,0.1);
+}
+
+.typing-bubble {
+  min-width: 58px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.typing-bubble span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-2);
+  animation: typingPulse 1.05s infinite ease-in-out;
+}
+
+.typing-bubble span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.typing-bubble span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+@keyframes typingPulse {
+  0%, 70%, 100% {
+    opacity: 0.35;
+    transform: translateY(0) scale(0.72);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1);
+  }
+}
+
+.presence-dot.online {
+  animation: onlinePulse 1.9s infinite;
+}
+
+@keyframes onlinePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(106, 247, 184, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(106, 247, 184, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(106, 247, 184, 0);
+  }
+}
+
+.btn-send,
+.btn-clear-chat,
+.btn-back-mobile,
+.btn-logout {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-send::after,
+.btn-clear-chat::after,
+.btn-back-mobile::after,
+.btn-logout::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  left: 50%;
+  top: 50%;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.26);
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.btn-send:active::after,
+.btn-clear-chat:active::after,
+.btn-back-mobile:active::after,
+.btn-logout:active::after {
+  animation: ripple 420ms ease-out;
+}
+
+@keyframes ripple {
+  0% {
+    opacity: 0.45;
+    transform: translate(-50%, -50%) scale(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(11);
+  }
+}
+
+.chat-input-area {
+  animation: inputRise 240ms var(--ease-premium);
+}
+
+@keyframes inputRise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chat-input:focus {
+  box-shadow: 0 0 0 3px rgba(124, 106, 247, 0.10);
+}
+
+.date-divider span {
+  animation: datePop 200ms var(--ease-premium);
+}
+
+@keyframes datePop {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
