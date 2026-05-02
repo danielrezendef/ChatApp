@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 type TokenListener = (accessToken: string | null) => void;
 const tokenListeners = new Set<TokenListener>();
@@ -9,9 +9,7 @@ function notifyTokenChange(accessToken: string | null) {
 
 export function subscribeTokenChange(listener: TokenListener) {
   tokenListeners.add(listener);
-  return () => {
-    tokenListeners.delete(listener);
-  };
+  return () => tokenListeners.delete(listener);
 }
 
 export function getAccessToken() {
