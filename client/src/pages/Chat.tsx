@@ -105,15 +105,8 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
-
-    api.get<User[]>('/api/users')
-      .then(setUsers)
-      .catch(err => {
-        console.error(err);
-        setUsers([]);
-      });
-  }, [token]);
+    api.get<User[]>('/api/users').then(setUsers).catch(console.error);
+  }, []);
 
   useEffect(() => {
     const handleEsc = (event: globalThis.KeyboardEvent) => {
