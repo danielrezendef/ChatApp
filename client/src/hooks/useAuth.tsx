@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { api, getAccessToken, setTokens, clearTokens, subscribeTokenChange } from '../lib/api';
+import { api, getAccessToken, setTokens, clearTokens } from '../lib/api';
 
 interface User {
   id: string;
@@ -21,14 +21,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = subscribeTokenChange(setToken);
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     const stored = getAccessToken();
