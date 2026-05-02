@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_URL || '';
+const BASE_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '');
 
 type TokenListener = (accessToken: string | null) => void;
 const tokenListeners = new Set<TokenListener>();
