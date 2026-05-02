@@ -7,63 +7,7 @@ interface AuthSocket extends Socket {
   userId?: string;
 }
 
-const onlineUsers = new Map<string, Set<string>>();
-const disconnectTimers = new Map<string, NodeJS.Timeout>();
-const DISCONNECT_DELAY_MS = 5000;
-
-async function setLastSeen(userId: string) {
-  await prisma.user.update({
-    where: { id: userId },
-    data: { lastSeenAt: new Date() },
-  }).catch(() => {});
-}
-
-function getOnlineUserIds() {
-  return Array.from(onlineUsers.keys());
-}
-
-function emitPresence(io: Server) {
-  io.emit('presence', getOnlineUserIds());
-}
-
-function addUserConnection(userId: string, socketId: string, io: Server) {
-  const pendingTimer = disconnectTimers.get(userId);
-  if (pendingTimer) {
-    clearTimeout(pendingTimer);
-    disconnectTimers.delete(userId);
-  }
-
-  const connections = onlineUsers.get(userId) || new Set<string>();
-  const wasOffline = connections.size === 0;
-
-  connections.add(socketId);
-  onlineUsers.set(userId, connections);
-
-  if (wasOffline) emitPresence(io);
-}
-
-function removeUserConnection(userId: string, socketId: string, io: Server) {
-  const connections = onlineUsers.get(userId);
-  if (!connections) return;
-
-  connections.delete(socketId);
-
-  if (connections.size > 0) return;
-
-  onlineUsers.delete(userId);
-
-  const timer = setTimeout(async () => {
-    disconnectTimers.delete(userId);
-
-    const currentConnections = onlineUsers.get(userId);
-    if (currentConnections && currentConnections.size > 0) return;
-
-    await setLastSeen(userId);
-    emitPresence(io);
-  }, DISCONNECT_DELAY_MS);
-
-  disconnectTimers.set(userId, timer);
-}
+const onlineUsers = new Set<string>();
 
 export function setupSocket(io: Server) {
   io.use((socket: AuthSocket, next) => {
@@ -84,8 +28,8 @@ export function setupSocket(io: Server) {
   io.on('connection', (socket: AuthSocket) => {
     const userId = socket.userId!;
 
-    addUserConnection(userId, socket.id, io);
-    socket.emit('presence', getOnlineUserIds());
+    onlineUsers.add(userId);
+    io.emit('presence', Array.from(onlineUsers));
 
     socket.join(`user:${userId}`);
 
@@ -121,7 +65,8 @@ export function setupSocket(io: Server) {
     });
 
     socket.on('disconnect', () => {
-      removeUserConnection(userId, socket.id, io);
+      onlineUsers.delete(userId);
+      io.emit('presence', Array.from(onlineUsers));
     });
   });
 }
