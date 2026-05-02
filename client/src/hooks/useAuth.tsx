@@ -24,7 +24,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = subscribeTokenChange(setToken);
-    return unsubscribe;
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
