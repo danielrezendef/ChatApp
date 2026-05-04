@@ -34,16 +34,14 @@ messagesRouter.delete('/:otherUserId', async (req: AuthRequest, res: Response): 
   const userId = req.userId!;
 
   try {
-    await prisma.message.deleteMany({
+    const deleted = await prisma.message.deleteMany({
       where: {
-        OR: [
-          { senderId: userId, receiverId: otherUserId },
-          { senderId: otherUserId, receiverId: userId },
-        ],
+        senderId: userId,
+        receiverId: otherUserId,
       },
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, deletedCount: deleted.count });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro interno' });
