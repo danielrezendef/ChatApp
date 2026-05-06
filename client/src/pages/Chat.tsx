@@ -41,6 +41,7 @@ const EMOJI_SHORTCUTS: Record<string, string> = {
 
 const RECENT_EMOJI_KEY = 'chatapp_recent_emojis';
 const IMAGE_PREFIX = '[image]';
+const NOTIFICATION_BODY_MAX_LENGTH = 140;
 
 function getInitials(email: string) {
   return email.slice(0, 2).toUpperCase();
@@ -69,6 +70,36 @@ function getImageSrc(content: string) {
   return content.replace(IMAGE_PREFIX, '');
 }
 
+function shouldShowDesktopNotification() {
+  return (
+    typeof document !== 'undefined' &&
+    document.visibilityState !== 'visible' &&
+    'Notification' in window &&
+    Notification.permission === 'granted'
+  );
+}
+
+function getNotificationBody(content: string) {
+  if (isImageMessage(content)) return '📸 Imagem recebida';
+  if (content.length <= NOTIFICATION_BODY_MAX_LENGTH) return content;
+  return `${content.slice(0, NOTIFICATION_BODY_MAX_LENGTH - 1)}…`;
+}
+
+function showMessageNotification(senderLabel: string, msg: Message) {
+  if (!shouldShowDesktopNotification()) return;
+
+  const notification = new Notification(senderLabel, {
+    body: getNotificationBody(msg.content),
+    tag: `chat-${msg.senderId}`,
+    silent: false,
+  });
+
+  notification.onclick = () => {
+    window.focus();
+    notification.close();
+  };
+}
+
 export default function Chat() {
   const { user, token, logout } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -88,10 +119,15 @@ export default function Chat() {
   const typingTimerRef = useRef<number | null>(null);
   const selectedRef = useRef<User | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tokenRef = useRef<string | null>(token);
 
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
+
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   useEffect(() => {
     const saved = localStorage.getItem(RECENT_EMOJI_KEY);
@@ -156,23 +192,19 @@ export default function Chat() {
       const current = selectedRef.current;
       const isIncoming = msg.receiverId === user?.id && msg.senderId !== user?.id;
       const isCurrentConversation = current?.id === msg.senderId;
+      const isTabVisible = document.visibilityState === 'visible';
 
-      if (current && isCurrentConversation) {
+      if (!isIncoming) return;
+
+      if (current && isCurrentConversation && isTabVisible) {
         socket.emit('read_messages', { from: current.id });
         setUnread(prev => ({ ...prev, [current.id]: 0 }));
         return;
       }
 
-      if (isIncoming) {
-        setUnread(prev => ({ ...prev, [msg.senderId]: (prev[msg.senderId] || 0) + 1 }));
-        const sender = users.find(u => u.id === msg.senderId);
-        const senderLabel = sender?.email || 'Nova mensagem';
-        const notificationBody = isImageMessage(msg.content) ? '📸 Imagem recebida' : msg.content;
-
-        if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification(senderLabel, { body: notificationBody, tag: `chat-${msg.senderId}`, silent: false });
-        }
-      }
+      setUnread(prev => ({ ...prev, [msg.senderId]: (prev[msg.senderId] || 0) + 1 }));
+      const sender = users.find(u => u.id === msg.senderId);
+      showMessageNotification(sender?.email || 'Nova mensagem', msg);
     };
 
     socket.on('presence', onPresence);
@@ -191,6 +223,20 @@ export default function Chat() {
   }, [token, user?.id, users]);
 
   useEffect(() => () => disconnectSocket(), []);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const current = selectedRef.current;
+      const currentToken = tokenRef.current;
+      if (document.visibilityState !== 'visible' || !current || !currentToken) return;
+
+      setUnread(prev => ({ ...prev, [current.id]: 0 }));
+      getSocket(currentToken).emit('read_messages', { from: current.id });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   useEffect(() => {
     if (!selected || !token) return;
