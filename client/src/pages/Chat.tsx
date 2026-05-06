@@ -70,10 +70,14 @@ function getImageSrc(content: string) {
   return content.replace(IMAGE_PREFIX, '');
 }
 
+function isChatWindowActive() {
+  return typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus();
+}
+
 function shouldShowDesktopNotification() {
   return (
     typeof document !== 'undefined' &&
-    document.visibilityState !== 'visible' &&
+    !isChatWindowActive() &&
     'Notification' in window &&
     Notification.permission === 'granted'
   );
@@ -120,6 +124,8 @@ export default function Chat() {
   const selectedRef = useRef<User | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tokenRef = useRef<string | null>(token);
+  const messagesRef = useRef<Message[]>(messages);
+  const usersRef = useRef<User[]>(users);
 
   useEffect(() => {
     selectedRef.current = selected;
@@ -128,6 +134,14 @@ export default function Chat() {
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    usersRef.current = users;
+  }, [users]);
 
   useEffect(() => {
     const saved = localStorage.getItem(RECENT_EMOJI_KEY);
@@ -183,6 +197,34 @@ export default function Chat() {
       setMessages(prev => prev.map(m => m.senderId === user?.id && m.receiverId === by ? { ...m, readAt: m.readAt || new Date().toISOString() } : m));
     };
 
+    const syncCurrentConversation = async () => {
+      const current = selectedRef.current;
+      if (!current) return;
+
+      try {
+        const data = await api.get<Message[]>(`/api/messages/${current.id}`);
+        const knownIds = new Set(messagesRef.current.map(m => m.id));
+        const missedIncoming = data.filter(m => !knownIds.has(m.id) && m.receiverId === user?.id && m.senderId !== user?.id);
+
+        setMessages(data);
+
+        if (missedIncoming.length === 0) return;
+
+        if (isChatWindowActive()) {
+          socket.emit('read_messages', { from: current.id });
+          setUnread(prev => ({ ...prev, [current.id]: 0 }));
+          return;
+        }
+
+        setUnread(prev => ({ ...prev, [current.id]: (prev[current.id] || 0) + missedIncoming.length }));
+        const latest = missedIncoming[missedIncoming.length - 1];
+        const sender = usersRef.current.find(u => u.id === latest.senderId);
+        showMessageNotification(sender?.email || 'Nova mensagem', latest);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
     const onNewMessage = (msg: Message) => {
       setMessages(prev => {
         if (prev.find(m => m.id === msg.id)) return prev;
@@ -192,11 +234,11 @@ export default function Chat() {
       const current = selectedRef.current;
       const isIncoming = msg.receiverId === user?.id && msg.senderId !== user?.id;
       const isCurrentConversation = current?.id === msg.senderId;
-      const isTabVisible = document.visibilityState === 'visible';
+      const isWindowActive = isChatWindowActive();
 
       if (!isIncoming) return;
 
-      if (current && isCurrentConversation && isTabVisible) {
+      if (current && isCurrentConversation && isWindowActive) {
         socket.emit('read_messages', { from: current.id });
         setUnread(prev => ({ ...prev, [current.id]: 0 }));
         return;
@@ -207,6 +249,7 @@ export default function Chat() {
       showMessageNotification(sender?.email || 'Nova mensagem', msg);
     };
 
+    socket.on('connect', syncCurrentConversation);
     socket.on('presence', onPresence);
     socket.on('typing', onTyping);
     socket.on('stop_typing', onStopTyping);
@@ -214,6 +257,7 @@ export default function Chat() {
     socket.on('new_message', onNewMessage);
 
     return () => {
+      socket.off('connect', syncCurrentConversation);
       socket.off('presence', onPresence);
       socket.off('typing', onTyping);
       socket.off('stop_typing', onStopTyping);
@@ -225,17 +269,22 @@ export default function Chat() {
   useEffect(() => () => disconnectSocket(), []);
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const markCurrentConversationAsRead = () => {
       const current = selectedRef.current;
       const currentToken = tokenRef.current;
-      if (document.visibilityState !== 'visible' || !current || !currentToken) return;
+      if (!isChatWindowActive() || !current || !currentToken) return;
 
       setUnread(prev => ({ ...prev, [current.id]: 0 }));
       getSocket(currentToken).emit('read_messages', { from: current.id });
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', markCurrentConversationAsRead);
+    window.addEventListener('focus', markCurrentConversationAsRead);
+
+    return () => {
+      document.removeEventListener('visibilitychange', markCurrentConversationAsRead);
+      window.removeEventListener('focus', markCurrentConversationAsRead);
+    };
   }, []);
 
   useEffect(() => {
