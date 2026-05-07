@@ -40,6 +40,12 @@ function isValidImageContent(content: string) {
   return Buffer.byteLength(match[1], 'base64') <= IMAGE_MAX_BYTES;
 }
 
+function normalizeMessageContent(content: unknown) {
+  if (typeof content !== 'string') return '';
+
+  return content.startsWith(IMAGE_PREFIX) ? content : content.trim();
+}
+
 function isValidMessageContent(content: string) {
   if (!content) return false;
 
@@ -101,7 +107,7 @@ export function setupSocket(io: Server) {
 
     socket.on('send_message', async (data: SendMessagePayload, ack?: SendMessageAck) => {
       const receiverId = typeof data?.receiverId === 'string' ? data.receiverId.trim() : '';
-      const content = typeof data?.content === 'string' ? data.content.trim() : '';
+      const content = normalizeMessageContent(data?.content);
 
       if (!receiverId || !isValidMessageContent(content)) {
         ack?.({ ok: false, error: 'Mensagem inválida' });
