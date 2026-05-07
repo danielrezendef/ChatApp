@@ -7,7 +7,33 @@ interface AuthSocket extends Socket {
   userId?: string;
 }
 
-const onlineUsers = new Set<string>();
+const onlineUsers = new Map<string, number>();
+
+function addOnlineUser(userId: string) {
+  onlineUsers.set(userId, (onlineUsers.get(userId) || 0) + 1);
+}
+
+function removeOnlineUser(userId: string) {
+  const connections = onlineUsers.get(userId) || 0;
+  if (connections <= 1) {
+    onlineUsers.delete(userId);
+    return;
+  }
+
+  onlineUsers.set(userId, connections - 1);
+}
+
+function emitPresence(io: Server) {
+  io.emit('presence', Array.from(onlineUsers.keys()));
+}
+
+type SendMessageAck = (response: { ok: boolean; message?: unknown; error?: string }) => void;
+
+interface SendMessagePayload {
+  receiverId?: string;
+  content?: string;
+  clientId?: string;
+}
 
 export function setupSocket(io: Server) {
   io.use((socket: AuthSocket, next) => {
@@ -28,8 +54,8 @@ export function setupSocket(io: Server) {
   io.on('connection', (socket: AuthSocket) => {
     const userId = socket.userId!;
 
-    onlineUsers.add(userId);
-    io.emit('presence', Array.from(onlineUsers));
+    addOnlineUser(userId);
+    emitPresence(io);
 
     socket.join(`user:${userId}`);
 
@@ -50,23 +76,37 @@ export function setupSocket(io: Server) {
       io.to(`user:${from}`).emit('messages_read', { by: userId });
     });
 
-    socket.on('send_message', async ({ receiverId, content }) => {
-      const message = await prisma.message.create({
-        data: {
-          senderId: userId,
-          receiverId,
-          content: encryptMessage(content),
-        },
-      });
+    socket.on('send_message', async (data: SendMessagePayload, ack?: SendMessageAck) => {
+      const receiverId = typeof data?.receiverId === 'string' ? data.receiverId.trim() : '';
+      const content = typeof data?.content === 'string' ? data.content.trim() : '';
 
-      const payload = { ...message, content };
+      if (!receiverId || !content || content.length > 5000) {
+        ack?.({ ok: false, error: 'Mensagem inválida' });
+        return;
+      }
 
-      io.to(`user:${userId}`).to(`user:${receiverId}`).emit('new_message', payload);
+      try {
+        const message = await prisma.message.create({
+          data: {
+            senderId: userId,
+            receiverId,
+            content: encryptMessage(content),
+          },
+        });
+
+        const payload = { ...message, content, clientId: data.clientId };
+
+        ack?.({ ok: true, message: payload });
+        socket.to(`user:${userId}`).to(`user:${receiverId}`).emit('new_message', payload);
+      } catch (err) {
+        console.error(err);
+        ack?.({ ok: false, error: 'Erro interno' });
+      }
     });
 
     socket.on('disconnect', () => {
-      onlineUsers.delete(userId);
-      io.emit('presence', Array.from(onlineUsers));
+      removeOnlineUser(userId);
+      emitPresence(io);
     });
   });
 }

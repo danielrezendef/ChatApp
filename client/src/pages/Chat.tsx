@@ -15,6 +15,15 @@ interface Message {
   receiverId: string;
   createdAt: string;
   readAt?: string | null;
+  clientId?: string;
+  pending?: boolean;
+  failed?: boolean;
+}
+
+interface SendMessageAck {
+  ok: boolean;
+  message?: Message;
+  error?: string;
 }
 
 type UnreadMap = Record<string, number>;
@@ -42,6 +51,7 @@ const EMOJI_SHORTCUTS: Record<string, string> = {
 const RECENT_EMOJI_KEY = 'chatapp_recent_emojis';
 const IMAGE_PREFIX = '[image]';
 const NOTIFICATION_BODY_MAX_LENGTH = 140;
+const ORIGINAL_TITLE = typeof document !== 'undefined' ? document.title : 'ChatApp';
 
 function getInitials(email: string) {
   return email.slice(0, 2).toUpperCase();
@@ -74,13 +84,17 @@ function isChatWindowActive() {
   return typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus();
 }
 
+function canUseNotifications() {
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+function getNotificationPermission(): NotificationPermission | 'unsupported' {
+  if (!canUseNotifications()) return 'unsupported';
+  return Notification.permission;
+}
+
 function shouldShowDesktopNotification() {
-  return (
-    typeof document !== 'undefined' &&
-    !isChatWindowActive() &&
-    'Notification' in window &&
-    Notification.permission === 'granted'
-  );
+  return !isChatWindowActive() && getNotificationPermission() === 'granted';
 }
 
 function getNotificationBody(content: string) {
@@ -117,6 +131,7 @@ export default function Chat() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(getNotificationPermission());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -148,11 +163,19 @@ export default function Chat() {
     if (saved) setRecentEmojis(JSON.parse(saved));
   }, []);
 
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => undefined);
+  const requestNotificationPermission = async () => {
+    if (!canUseNotifications()) {
+      setNotificationPermission('unsupported');
+      return;
     }
-  }, []);
+
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+    } catch {
+      setNotificationPermission(Notification.permission);
+    }
+  };
 
   useEffect(() => {
     api.get<User[]>('/api/users').then(setUsers).catch(console.error);
@@ -245,7 +268,7 @@ export default function Chat() {
       }
 
       setUnread(prev => ({ ...prev, [msg.senderId]: (prev[msg.senderId] || 0) + 1 }));
-      const sender = users.find(u => u.id === msg.senderId);
+      const sender = usersRef.current.find(u => u.id === msg.senderId);
       showMessageNotification(sender?.email || 'Nova mensagem', msg);
     };
 
@@ -264,7 +287,7 @@ export default function Chat() {
       socket.off('messages_read', onMessagesRead);
       socket.off('new_message', onNewMessage);
     };
-  }, [token, user?.id, users]);
+  }, [token, user?.id]);
 
   useEffect(() => () => disconnectSocket(), []);
 
@@ -286,6 +309,16 @@ export default function Chat() {
       window.removeEventListener('focus', markCurrentConversationAsRead);
     };
   }, []);
+
+
+  useEffect(() => {
+    const totalUnread = Object.values(unread).reduce((total, count) => total + count, 0);
+    document.title = totalUnread > 0 ? `(${totalUnread}) ${ORIGINAL_TITLE}` : ORIGINAL_TITLE;
+
+    return () => {
+      document.title = ORIGINAL_TITLE;
+    };
+  }, [unread]);
 
   useEffect(() => {
     if (!selected || !token) return;
@@ -352,11 +385,33 @@ export default function Chat() {
   };
 
   const sendRawContent = useCallback((content: string) => {
-    if (!content || !selected || !token) return;
+    if (!content || !selected || !token || !user) return;
+
+    const clientId = `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimisticMessage: Message = {
+      id: clientId,
+      clientId,
+      content,
+      senderId: user.id,
+      receiverId: selected.id,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+      pending: true,
+    };
+
+    setMessages(prev => [...prev, optimisticMessage]);
+
     const socket = getSocket(token);
-    socket.emit('send_message', { receiverId: selected.id, content });
+    socket.timeout(8000).emit('send_message', { receiverId: selected.id, content, clientId }, (err: Error | null, response?: SendMessageAck) => {
+      if (err || !response?.ok || !response.message) {
+        setMessages(prev => prev.map(m => m.clientId === clientId ? { ...m, pending: false, failed: true } : m));
+        return;
+      }
+
+      setMessages(prev => prev.map(m => m.clientId === clientId ? { ...response.message!, pending: false } : m));
+    });
     socket.emit('stop_typing', { to: selected.id });
-  }, [selected, token]);
+  }, [selected, token, user]);
 
   const sendMessage = useCallback(() => {
     const content = replaceEmojiShortcut(input.trim());
@@ -428,6 +483,12 @@ export default function Chat() {
           <div className="sidebar-me-info"><div className="sidebar-me-label">Você</div><div className="sidebar-me-email">{user?.email}</div></div>
           <button className="btn-logout" onClick={logout} title="Sair"><span>Sair</span></button>
         </div>
+        {notificationPermission === 'default' && (
+          <button className="btn-notifications" onClick={requestNotificationPermission}>🔔 Ativar notificações</button>
+        )}
+        {notificationPermission === 'denied' && (
+          <div className="notification-hint">Notificações bloqueadas no navegador.</div>
+        )}
         <div className="sidebar-section-title">Conversas</div>
         <div className="users-list">
           {users.length === 0 && <div style={{ padding: '12px', color: 'var(--text-3)', fontSize: 13 }}>Nenhum usuário cadastrado.</div>}
@@ -460,7 +521,7 @@ export default function Chat() {
               {!loadingMsgs && messagesByDate.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-3)', fontSize: 13, marginTop: 40 }}>Nenhuma mensagem ainda. Diga olá! 👋</div>}
               {messagesByDate.map(group => <div key={group.date} className="msg-group"><div className="date-divider"><span>{group.date}</span></div>{group.messages.map(msg => {
                 const mine = msg.senderId === user?.id;
-                return <div key={msg.id} className={`msg-wrapper ${mine ? 'mine' : 'theirs'}`}><div className="msg-bubble">{isImageMessage(msg.content) ? <img className="chat-image" src={getImageSrc(msg.content)} alt="Imagem enviada" /> : msg.content}<span className="msg-time">{formatTime(msg.createdAt)}{mine && <span className={`msg-check ${msg.readAt ? 'read' : ''}`}>{msg.readAt ? ' ✔✔' : ' ✔'}</span>}</span></div></div>;
+                return <div key={msg.id} className={`msg-wrapper ${mine ? 'mine' : 'theirs'}`}><div className="msg-bubble">{isImageMessage(msg.content) ? <img className="chat-image" src={getImageSrc(msg.content)} alt="Imagem enviada" /> : msg.content}<span className="msg-time">{formatTime(msg.createdAt)}{mine && <span className={`msg-check ${msg.readAt ? 'read' : ''}`}>{msg.failed ? ' ⚠' : msg.pending ? ' …' : msg.readAt ? ' ✔✔' : ' ✔'}</span>}</span></div></div>;
               })}</div>)}
               {typingFrom === selected.id && <div className="msg-wrapper theirs"><div className="msg-bubble typing-bubble"><span></span><span></span><span></span></div></div>}
               <div ref={messagesEndRef} />

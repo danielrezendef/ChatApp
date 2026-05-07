@@ -12,10 +12,12 @@ export function getSocket(token: string): Socket {
     socketInstance = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
+      timeout: 5000,
+      upgrade: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 5000,
+      reconnectionDelay: 300,
+      reconnectionDelayMax: 3000,
     });
     socketToken = token;
     return socketInstance;
