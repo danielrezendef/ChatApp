@@ -8,6 +8,10 @@ interface AuthSocket extends Socket {
 }
 
 const onlineUsers = new Map<string, number>();
+const TEXT_MESSAGE_MAX_LENGTH = 5000;
+const IMAGE_PREFIX = '[image]';
+const IMAGE_MAX_BYTES = 1024 * 1024;
+const IMAGE_DATA_URL_PATTERN = /^data:image\/[a-zA-Z0-9.+-]+;base64,([A-Za-z0-9+/]+={0,2})$/;
 
 function addOnlineUser(userId: string) {
   onlineUsers.set(userId, (onlineUsers.get(userId) || 0) + 1);
@@ -25,6 +29,31 @@ function removeOnlineUser(userId: string) {
 
 function emitPresence(io: Server) {
   io.emit('presence', Array.from(onlineUsers.keys()));
+}
+
+function isValidImageContent(content: string) {
+  const dataUrl = content.slice(IMAGE_PREFIX.length);
+  const match = dataUrl.match(IMAGE_DATA_URL_PATTERN);
+
+  if (!match) return false;
+
+  return Buffer.byteLength(match[1], 'base64') <= IMAGE_MAX_BYTES;
+}
+
+function normalizeMessageContent(content: unknown) {
+  if (typeof content !== 'string') return '';
+
+  return content.startsWith(IMAGE_PREFIX) ? content : content.trim();
+}
+
+function isValidMessageContent(content: string) {
+  if (!content) return false;
+
+  if (content.startsWith(IMAGE_PREFIX)) {
+    return isValidImageContent(content);
+  }
+
+  return content.length <= TEXT_MESSAGE_MAX_LENGTH;
 }
 
 type SendMessageAck = (response: { ok: boolean; message?: unknown; error?: string }) => void;
@@ -78,9 +107,9 @@ export function setupSocket(io: Server) {
 
     socket.on('send_message', async (data: SendMessagePayload, ack?: SendMessageAck) => {
       const receiverId = typeof data?.receiverId === 'string' ? data.receiverId.trim() : '';
-      const content = typeof data?.content === 'string' ? data.content.trim() : '';
+      const content = normalizeMessageContent(data?.content);
 
-      if (!receiverId || !content || content.length > 5000) {
+      if (!receiverId || !isValidMessageContent(content)) {
         ack?.({ ok: false, error: 'Mensagem inválida' });
         return;
       }
