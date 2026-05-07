@@ -565,3 +565,46 @@ input, textarea {
   .user-item { justify-content: center; padding: 10px 0; }
   .auth-card { padding: 32px 24px; }
 }
+
+.btn-notifications {
+  margin: 12px 20px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-dim);
+  color: var(--accent-hover);
+  border: 1px solid rgba(124, 106, 247, 0.35);
+  font-size: 13px;
+  font-weight: 700;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+}
+
+.btn-notifications:hover {
+  background: rgba(124, 106, 247, 0.22);
+  border-color: rgba(124, 106, 247, 0.55);
+}
+
+.btn-notifications:active {
+  transform: scale(0.98);
+}
+
+.notification-hint {
+  margin: 12px 20px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(247, 106, 106, 0.10);
+  color: var(--danger);
+  border: 1px solid rgba(247, 106, 106, 0.22);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.msg-check:not(.read) {
+  opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+  .btn-notifications,
+  .notification-hint {
+    display: none;
+  }
+}
