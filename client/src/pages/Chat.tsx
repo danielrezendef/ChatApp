@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback, KeyboardEvent } from 'react';
-import { api } from '../lib/api';
-import { useAuth } from '../hooks/useAuth';
-import { getSocket, disconnectSocket } from '../lib/socket';
+import { useState, useEffect, useRef, useCallback, KeyboardEvent } from "react";
+import { api } from "../lib/api";
+import { useAuth } from "../hooks/useAuth";
+import { getSocket, disconnectSocket } from "../lib/socket";
 
 interface User {
   id: string;
@@ -20,45 +20,63 @@ interface Message {
   failed?: boolean;
 }
 
-interface SendMessageAck {
-  ok: boolean;
-  message?: Message;
-  error?: string;
-}
-
 type UnreadMap = Record<string, number>;
 
-const EMOJIS = ['😀', '😂', '😍', '😎', '😭', '😡', '🙏', '👏', '🔥', '❤️', '👍', '👎', '🎉', '💪', '🤝', '✅', '⚠️', '💬'];
+const EMOJIS = [
+  "😀",
+  "😂",
+  "😍",
+  "😎",
+  "😭",
+  "😡",
+  "🙏",
+  "👏",
+  "🔥",
+  "❤️",
+  "👍",
+  "👎",
+  "🎉",
+  "💪",
+  "🤝",
+  "✅",
+  "⚠️",
+  "💬",
+];
 
 const EMOJI_SHORTCUTS: Record<string, string> = {
-  ':smile:': '😀',
-  ':joy:': '😂',
-  ':love:': '😍',
-  ':cool:': '😎',
-  ':cry:': '😭',
-  ':angry:': '😡',
-  ':pray:': '🙏',
-  ':clap:': '👏',
-  ':fire:': '🔥',
-  ':heart:': '❤️',
-  ':like:': '👍',
-  ':dislike:': '👎',
-  ':party:': '🎉',
-  ':ok:': '✅',
-  ':warn:': '⚠️',
+  ":smile:": "😀",
+  ":joy:": "😂",
+  ":love:": "😍",
+  ":cool:": "😎",
+  ":cry:": "😭",
+  ":angry:": "😡",
+  ":pray:": "🙏",
+  ":clap:": "👏",
+  ":fire:": "🔥",
+  ":heart:": "❤️",
+  ":like:": "👍",
+  ":dislike:": "👎",
+  ":party:": "🎉",
+  ":ok:": "✅",
+  ":warn:": "⚠️",
 };
 
-const RECENT_EMOJI_KEY = 'chatapp_recent_emojis';
-const IMAGE_PREFIX = '[image]';
+const RECENT_EMOJI_KEY = "chatapp_recent_emojis";
+const IMAGE_PREFIX = "[image]";
 const NOTIFICATION_BODY_MAX_LENGTH = 140;
-const ORIGINAL_TITLE = typeof document !== 'undefined' ? document.title : 'ChatApp';
+const CONVERSATION_SYNC_INTERVAL_MS = 7000;
+const ORIGINAL_TITLE =
+  typeof document !== "undefined" ? document.title : "ChatApp";
 
 function getInitials(email: string) {
   return email.slice(0, 2).toUpperCase();
 }
 
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatDate(iso: string) {
@@ -67,9 +85,13 @@ function formatDate(iso: string) {
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
 
-  if (d.toDateString() === today.toDateString()) return 'Hoje';
-  if (d.toDateString() === yesterday.toDateString()) return 'Ontem';
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+  if (d.toDateString() === today.toDateString()) return "Hoje";
+  if (d.toDateString() === yesterday.toDateString()) return "Ontem";
+  return d.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function isImageMessage(content: string) {
@@ -77,30 +99,83 @@ function isImageMessage(content: string) {
 }
 
 function getImageSrc(content: string) {
-  return content.replace(IMAGE_PREFIX, '');
+  return content.replace(IMAGE_PREFIX, "");
 }
 
 function isChatWindowActive() {
-  return typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus();
+  return (
+    typeof document !== "undefined" &&
+    document.visibilityState === "visible" &&
+    document.hasFocus()
+  );
 }
 
 function canUseNotifications() {
-  return typeof window !== 'undefined' && 'Notification' in window;
+  return typeof window !== "undefined" && "Notification" in window;
 }
 
-function getNotificationPermission(): NotificationPermission | 'unsupported' {
-  if (!canUseNotifications()) return 'unsupported';
+function getNotificationPermission(): NotificationPermission | "unsupported" {
+  if (!canUseNotifications()) return "unsupported";
   return Notification.permission;
 }
 
 function shouldShowDesktopNotification() {
-  return !isChatWindowActive() && getNotificationPermission() === 'granted';
+  return !isChatWindowActive() && getNotificationPermission() === "granted";
 }
 
 function getNotificationBody(content: string) {
-  if (isImageMessage(content)) return '📸 Imagem recebida';
+  if (isImageMessage(content)) return "📸 Imagem recebida";
   if (content.length <= NOTIFICATION_BODY_MAX_LENGTH) return content;
   return `${content.slice(0, NOTIFICATION_BODY_MAX_LENGTH - 1)}…`;
+}
+
+function isSameMessageSnapshot(current: Message[], next: Message[]) {
+  if (current.length !== next.length) return false;
+
+  return current.every((message, index) => {
+    const nextMessage = next[index];
+    return (
+      Boolean(nextMessage) &&
+      message.id === nextMessage.id &&
+      message.readAt === nextMessage.readAt
+    );
+  });
+}
+
+function replaceOptimisticMessage(messages: Message[], savedMessage: Message) {
+  const withoutDuplicates = messages.filter(
+    (message) => message.id !== savedMessage.id,
+  );
+  const optimisticIndex = withoutDuplicates.findIndex(
+    (message) => message.clientId && message.clientId === savedMessage.clientId,
+  );
+
+  if (optimisticIndex === -1)
+    return [
+      ...withoutDuplicates,
+      { ...savedMessage, pending: false, failed: false },
+    ];
+
+  return withoutDuplicates.map((message, index) =>
+    index === optimisticIndex
+      ? { ...savedMessage, pending: false, failed: false }
+      : message,
+  );
+}
+
+function mergeConversationSnapshot(current: Message[], next: Message[]) {
+  const knownIds = new Set(next.map((message) => message.id));
+  const knownClientIds = new Set(
+    next.map((message) => message.clientId).filter(Boolean),
+  );
+  const localOnly = current.filter(
+    (message) =>
+      (message.pending || message.failed) &&
+      !knownIds.has(message.id) &&
+      (!message.clientId || !knownClientIds.has(message.clientId)),
+  );
+
+  return [...next, ...localOnly];
 }
 
 function showMessageNotification(senderLabel: string, msg: Message) {
@@ -123,7 +198,7 @@ export default function Chat() {
   const [users, setUsers] = useState<User[]>([]);
   const [selected, setSelected] = useState<User | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [online, setOnline] = useState<string[]>([]);
   const [typingFrom, setTypingFrom] = useState<string | null>(null);
@@ -131,7 +206,9 @@ export default function Chat() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(getNotificationPermission());
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermission | "unsupported"
+  >(getNotificationPermission());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -165,7 +242,7 @@ export default function Chat() {
 
   const requestNotificationPermission = async () => {
     if (!canUseNotifications()) {
-      setNotificationPermission('unsupported');
+      setNotificationPermission("unsupported");
       return;
     }
 
@@ -178,27 +255,27 @@ export default function Chat() {
   };
 
   useEffect(() => {
-    api.get<User[]>('/api/users').then(setUsers).catch(console.error);
+    api.get<User[]>("/api/users").then(setUsers).catch(console.error);
   }, []);
 
   useEffect(() => {
     const handleEsc = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && imagePreview) {
+      if (event.key === "Escape" && imagePreview) {
         setImagePreview(null);
         return;
       }
-      if (event.key === 'Escape' && showEmojiPicker) {
+      if (event.key === "Escape" && showEmojiPicker) {
         setShowEmojiPicker(false);
         return;
       }
-      if (event.key === 'Escape' && selectedRef.current) {
+      if (event.key === "Escape" && selectedRef.current) {
         setSelected(null);
         setTypingFrom(null);
       }
     };
 
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
   }, [showEmojiPicker, imagePreview]);
 
   useEffect(() => {
@@ -217,7 +294,13 @@ export default function Chat() {
     };
 
     const onMessagesRead = ({ by }: { by: string }) => {
-      setMessages(prev => prev.map(m => m.senderId === user?.id && m.receiverId === by ? { ...m, readAt: m.readAt || new Date().toISOString() } : m));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.senderId === user?.id && m.receiverId === by
+            ? { ...m, readAt: m.readAt || new Date().toISOString() }
+            : m,
+        ),
+      );
     };
 
     const syncCurrentConversation = async () => {
@@ -226,66 +309,80 @@ export default function Chat() {
 
       try {
         const data = await api.get<Message[]>(`/api/messages/${current.id}`);
-        const knownIds = new Set(messagesRef.current.map(m => m.id));
-        const missedIncoming = data.filter(m => !knownIds.has(m.id) && m.receiverId === user?.id && m.senderId !== user?.id);
+        const knownIds = new Set(messagesRef.current.map((m) => m.id));
+        const missedIncoming = data.filter(
+          (m) =>
+            !knownIds.has(m.id) &&
+            m.receiverId === user?.id &&
+            m.senderId !== user?.id,
+        );
 
         setMessages(data);
 
         if (missedIncoming.length === 0) return;
 
         if (isChatWindowActive()) {
-          socket.emit('read_messages', { from: current.id });
-          setUnread(prev => ({ ...prev, [current.id]: 0 }));
+          socket.emit("read_messages", { from: current.id });
+          setUnread((prev) => ({ ...prev, [current.id]: 0 }));
           return;
         }
 
-        setUnread(prev => ({ ...prev, [current.id]: (prev[current.id] || 0) + missedIncoming.length }));
+        setUnread((prev) => ({
+          ...prev,
+          [current.id]: (prev[current.id] || 0) + missedIncoming.length,
+        }));
         const latest = missedIncoming[missedIncoming.length - 1];
-        const sender = usersRef.current.find(u => u.id === latest.senderId);
-        showMessageNotification(sender?.email || 'Nova mensagem', latest);
+        const sender = usersRef.current.find((u) => u.id === latest.senderId);
+        showMessageNotification(sender?.email || "Nova mensagem", latest);
       } catch (err) {
         console.error(err);
       }
     };
 
     const onNewMessage = (msg: Message) => {
-      setMessages(prev => {
-        if (prev.find(m => m.id === msg.id)) return prev;
+      setMessages((prev) => {
+        if (prev.find((m) => m.id === msg.id)) return prev;
+        if (msg.clientId && prev.find((m) => m.clientId === msg.clientId))
+          return replaceOptimisticMessage(prev, msg);
         return [...prev, msg];
       });
 
       const current = selectedRef.current;
-      const isIncoming = msg.receiverId === user?.id && msg.senderId !== user?.id;
+      const isIncoming =
+        msg.receiverId === user?.id && msg.senderId !== user?.id;
       const isCurrentConversation = current?.id === msg.senderId;
       const isWindowActive = isChatWindowActive();
 
       if (!isIncoming) return;
 
       if (current && isCurrentConversation && isWindowActive) {
-        socket.emit('read_messages', { from: current.id });
-        setUnread(prev => ({ ...prev, [current.id]: 0 }));
+        socket.emit("read_messages", { from: current.id });
+        setUnread((prev) => ({ ...prev, [current.id]: 0 }));
         return;
       }
 
-      setUnread(prev => ({ ...prev, [msg.senderId]: (prev[msg.senderId] || 0) + 1 }));
-      const sender = usersRef.current.find(u => u.id === msg.senderId);
-      showMessageNotification(sender?.email || 'Nova mensagem', msg);
+      setUnread((prev) => ({
+        ...prev,
+        [msg.senderId]: (prev[msg.senderId] || 0) + 1,
+      }));
+      const sender = usersRef.current.find((u) => u.id === msg.senderId);
+      showMessageNotification(sender?.email || "Nova mensagem", msg);
     };
 
-    socket.on('connect', syncCurrentConversation);
-    socket.on('presence', onPresence);
-    socket.on('typing', onTyping);
-    socket.on('stop_typing', onStopTyping);
-    socket.on('messages_read', onMessagesRead);
-    socket.on('new_message', onNewMessage);
+    socket.on("connect", syncCurrentConversation);
+    socket.on("presence", onPresence);
+    socket.on("typing", onTyping);
+    socket.on("stop_typing", onStopTyping);
+    socket.on("messages_read", onMessagesRead);
+    socket.on("new_message", onNewMessage);
 
     return () => {
-      socket.off('connect', syncCurrentConversation);
-      socket.off('presence', onPresence);
-      socket.off('typing', onTyping);
-      socket.off('stop_typing', onStopTyping);
-      socket.off('messages_read', onMessagesRead);
-      socket.off('new_message', onNewMessage);
+      socket.off("connect", syncCurrentConversation);
+      socket.off("presence", onPresence);
+      socket.off("typing", onTyping);
+      socket.off("stop_typing", onStopTyping);
+      socket.off("messages_read", onMessagesRead);
+      socket.off("new_message", onNewMessage);
     };
   }, [token, user?.id]);
 
@@ -297,23 +394,32 @@ export default function Chat() {
       const currentToken = tokenRef.current;
       if (!isChatWindowActive() || !current || !currentToken) return;
 
-      setUnread(prev => ({ ...prev, [current.id]: 0 }));
-      getSocket(currentToken).emit('read_messages', { from: current.id });
+      setUnread((prev) => ({ ...prev, [current.id]: 0 }));
+      getSocket(currentToken).emit("read_messages", { from: current.id });
     };
 
-    document.addEventListener('visibilitychange', markCurrentConversationAsRead);
-    window.addEventListener('focus', markCurrentConversationAsRead);
+    document.addEventListener(
+      "visibilitychange",
+      markCurrentConversationAsRead,
+    );
+    window.addEventListener("focus", markCurrentConversationAsRead);
 
     return () => {
-      document.removeEventListener('visibilitychange', markCurrentConversationAsRead);
-      window.removeEventListener('focus', markCurrentConversationAsRead);
+      document.removeEventListener(
+        "visibilitychange",
+        markCurrentConversationAsRead,
+      );
+      window.removeEventListener("focus", markCurrentConversationAsRead);
     };
   }, []);
 
-
   useEffect(() => {
-    const totalUnread = Object.values(unread).reduce((total, count) => total + count, 0);
-    document.title = totalUnread > 0 ? `(${totalUnread}) ${ORIGINAL_TITLE}` : ORIGINAL_TITLE;
+    const totalUnread = Object.values(unread).reduce(
+      (total, count) => total + count,
+      0,
+    );
+    document.title =
+      totalUnread > 0 ? `(${totalUnread}) ${ORIGINAL_TITLE}` : ORIGINAL_TITLE;
 
     return () => {
       document.title = ORIGINAL_TITLE;
@@ -323,57 +429,92 @@ export default function Chat() {
   useEffect(() => {
     if (!selected || !token) return;
 
-    setLoadingMsgs(true);
+    let cancelled = false;
+
+    const syncConversation = async (showLoading = false) => {
+      if (showLoading) setLoadingMsgs(true);
+
+      try {
+        const data = await api.get<Message[]>(`/api/messages/${selected.id}`);
+        if (cancelled) return;
+
+        setMessages((prev) => {
+          const merged = mergeConversationSnapshot(prev, data);
+          return isSameMessageSnapshot(prev, merged) ? prev : merged;
+        });
+        setUnread((prev) => ({ ...prev, [selected.id]: 0 }));
+        getSocket(token).emit("read_messages", { from: selected.id });
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (!cancelled && showLoading) setLoadingMsgs(false);
+      }
+    };
+
     setTypingFrom(null);
-    setUnread(prev => ({ ...prev, [selected.id]: 0 }));
     setShowEmojiPicker(false);
     setImagePreview(null);
+    syncConversation(true);
 
-    api.get<Message[]>(`/api/messages/${selected.id}`)
-      .then(data => {
-        setMessages(data);
-        const socket = getSocket(token);
-        socket.emit('read_messages', { from: selected.id });
-      })
-      .catch(console.error)
-      .finally(() => setLoadingMsgs(false));
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") syncConversation();
+    }, CONVERSATION_SYNC_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, [selected, token]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typingFrom]);
 
   const clearConversation = async () => {
     if (!selected) return;
-    if (!confirm('Deseja realmente apagar esta conversa?')) return;
+    if (!confirm("Deseja realmente apagar esta conversa?")) return;
 
     try {
       await api.delete<{ ok: boolean }>(`/api/messages/${selected.id}`);
-      setUnread(prev => ({ ...prev, [selected.id]: 0 }));
-      setMessages(prev => prev.filter(m => !((m.senderId === user?.id && m.receiverId === selected.id) || (m.senderId === selected.id && m.receiverId === user?.id))));
+      setUnread((prev) => ({ ...prev, [selected.id]: 0 }));
+      setMessages((prev) =>
+        prev.filter(
+          (m) =>
+            !(
+              (m.senderId === user?.id && m.receiverId === selected.id) ||
+              (m.senderId === selected.id && m.receiverId === user?.id)
+            ),
+        ),
+      );
     } catch (err) {
       console.error(err);
-      alert('Não foi possível limpar a conversa.');
+      alert("Não foi possível limpar a conversa.");
     }
   };
 
   const emitTyping = () => {
     if (!selected || !token) return;
     const socket = getSocket(token);
-    socket.emit('typing', { to: selected.id });
+    socket.emit("typing", { to: selected.id });
 
     if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = window.setTimeout(() => socket.emit('stop_typing', { to: selected.id }), 900);
+    typingTimerRef.current = window.setTimeout(
+      () => socket.emit("stop_typing", { to: selected.id }),
+      900,
+    );
   };
 
   const saveRecentEmoji = (emoji: string) => {
-    const updated = [emoji, ...recentEmojis.filter(e => e !== emoji)].slice(0, 8);
+    const updated = [emoji, ...recentEmojis.filter((e) => e !== emoji)].slice(
+      0,
+      8,
+    );
     setRecentEmojis(updated);
     localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(updated));
   };
 
   const addEmoji = (emoji: string) => {
-    setInput(prev => `${prev}${emoji}`);
+    setInput((prev) => `${prev}${emoji}`);
     setShowEmojiPicker(false);
     saveRecentEmoji(emoji);
     textareaRef.current?.focus();
@@ -381,63 +522,81 @@ export default function Chat() {
   };
 
   const replaceEmojiShortcut = (value: string) => {
-    return value.replace(/:[a-z]+:/gi, match => EMOJI_SHORTCUTS[match.toLowerCase()] || match);
+    return value.replace(
+      /:[a-z]+:/gi,
+      (match) => EMOJI_SHORTCUTS[match.toLowerCase()] || match,
+    );
   };
 
-  const sendRawContent = useCallback((content: string) => {
-    if (!content || !selected || !token || !user) return;
+  const sendRawContent = useCallback(
+    (content: string) => {
+      if (!content || !selected || !token || !user) return;
 
-    const clientId = `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const optimisticMessage: Message = {
-      id: clientId,
-      clientId,
-      content,
-      senderId: user.id,
-      receiverId: selected.id,
-      createdAt: new Date().toISOString(),
-      readAt: null,
-      pending: true,
-    };
+      const currentSelected = selected;
+      const clientId = `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const optimisticMessage: Message = {
+        id: clientId,
+        clientId,
+        content,
+        senderId: user.id,
+        receiverId: currentSelected.id,
+        createdAt: new Date().toISOString(),
+        readAt: null,
+        pending: true,
+      };
 
-    setMessages(prev => [...prev, optimisticMessage]);
+      setMessages((prev) => [...prev, optimisticMessage]);
 
-    const socket = getSocket(token);
-    socket.timeout(8000).emit('send_message', { receiverId: selected.id, content, clientId }, (err: Error | null, response?: SendMessageAck) => {
-      if (err || !response?.ok || !response.message) {
-        setMessages(prev => prev.map(m => m.clientId === clientId ? { ...m, pending: false, failed: true } : m));
-        return;
-      }
+      api
+        .post<Message>("/api/messages", {
+          receiverId: currentSelected.id,
+          content,
+          clientId,
+        })
+        .then((savedMessage) => {
+          setMessages((prev) => replaceOptimisticMessage(prev, savedMessage));
+        })
+        .catch((err) => {
+          console.error(err);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.clientId === clientId
+                ? { ...m, pending: false, failed: true }
+                : m,
+            ),
+          );
+        });
 
-      setMessages(prev => prev.map(m => m.clientId === clientId ? { ...response.message!, pending: false } : m));
-    });
-    socket.emit('stop_typing', { to: selected.id });
-  }, [selected, token, user]);
+      getSocket(token).emit("stop_typing", { to: currentSelected.id });
+    },
+    [selected, token, user],
+  );
 
   const sendMessage = useCallback(() => {
     const content = replaceEmojiShortcut(input.trim());
     if (!content) return;
     sendRawContent(content);
-    setInput('');
+    setInput("");
     setShowEmojiPicker(false);
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   }, [input, sendRawContent]);
 
   const sendImage = () => {
     if (!imagePreview) return;
     sendRawContent(`${IMAGE_PREFIX}${imagePreview}`);
     setImagePreview(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      alert('Selecione uma imagem válida.');
+    if (!file.type.startsWith("image/")) {
+      alert("Selecione uma imagem válida.");
       return;
     }
     if (file.size > 1024 * 1024) {
-      alert('Selecione uma imagem com até 1MB.');
+      alert("Selecione uma imagem com até 1MB.");
       return;
     }
 
@@ -447,7 +606,7 @@ export default function Chat() {
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
@@ -456,15 +615,17 @@ export default function Chat() {
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = replaceEmojiShortcut(e.target.value);
     setInput(value);
-    e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+    e.target.style.height = "auto";
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
     emitTyping();
   };
 
   const messagesByDate: { date: string; messages: Message[] }[] = [];
-  messages.forEach(msg => {
+  messages.forEach((msg) => {
     if (!selected) return;
-    const belongs = (msg.senderId === user?.id && msg.receiverId === selected.id) || (msg.senderId === selected.id && msg.receiverId === user?.id);
+    const belongs =
+      (msg.senderId === user?.id && msg.receiverId === selected.id) ||
+      (msg.senderId === selected.id && msg.receiverId === user?.id);
     if (!belongs) return;
     const date = formatDate(msg.createdAt);
     const last = messagesByDate[messagesByDate.length - 1];
@@ -474,69 +635,282 @@ export default function Chat() {
 
   return (
     <div className="app-layout">
-      <aside className={`sidebar ${selected ? 'mobile-hidden' : ''}`}>
+      <aside className={`sidebar ${selected ? "mobile-hidden" : ""}`}>
         <div className="sidebar-header">
-          <div className="sidebar-logo"><div className="sidebar-logo-dot" /><span className="sidebar-logo-name">ChatApp</span></div>
+          <div className="sidebar-logo">
+            <div className="sidebar-logo-dot" />
+            <span className="sidebar-logo-name">ChatApp</span>
+          </div>
         </div>
         <div className="sidebar-me">
-          <div className="avatar">{user ? getInitials(user.email) : '?'}</div>
-          <div className="sidebar-me-info"><div className="sidebar-me-label">Você</div><div className="sidebar-me-email">{user?.email}</div></div>
-          <button className="btn-logout" onClick={logout} title="Sair"><span>Sair</span></button>
+          <div className="avatar">{user ? getInitials(user.email) : "?"}</div>
+          <div className="sidebar-me-info">
+            <div className="sidebar-me-label">Você</div>
+            <div className="sidebar-me-email">{user?.email}</div>
+          </div>
+          <button className="btn-logout" onClick={logout} title="Sair">
+            <span>Sair</span>
+          </button>
         </div>
-        {notificationPermission === 'default' && (
-          <button className="btn-notifications" onClick={requestNotificationPermission}>🔔 Ativar notificações</button>
+        {notificationPermission === "default" && (
+          <button
+            className="btn-notifications"
+            onClick={requestNotificationPermission}
+          >
+            🔔 Ativar notificações
+          </button>
         )}
-        {notificationPermission === 'denied' && (
-          <div className="notification-hint">Notificações bloqueadas no navegador.</div>
+        {notificationPermission === "denied" && (
+          <div className="notification-hint">
+            Notificações bloqueadas no navegador.
+          </div>
         )}
         <div className="sidebar-section-title">Conversas</div>
         <div className="users-list">
-          {users.length === 0 && <div style={{ padding: '12px', color: 'var(--text-3)', fontSize: 13 }}>Nenhum usuário cadastrado.</div>}
-          {users.map(u => {
+          {users.length === 0 && (
+            <div
+              style={{ padding: "12px", color: "var(--text-3)", fontSize: 13 }}
+            >
+              Nenhum usuário cadastrado.
+            </div>
+          )}
+          {users.map((u) => {
             const isOnline = online.includes(u.id);
             const unreadCount = unread[u.id] || 0;
             return (
-              <div key={u.id} className={`user-item ${selected?.id === u.id ? 'active' : ''} ${unreadCount > 0 ? 'has-unread' : ''}`} onClick={() => setSelected(u)}>
-                <div className="avatar avatar-sm avatar-wrap">{getInitials(u.email)}<span className={`presence-dot ${isOnline ? 'online' : 'offline'}`} /></div>
-                <div className="user-item-info"><div className="user-item-email">{u.email}</div><div className="user-item-status">{unreadCount > 0 ? 'nova mensagem' : isOnline ? 'online' : 'offline'}</div></div>
-                {unreadCount > 0 && <span className="unread-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+              <div
+                key={u.id}
+                className={`user-item ${selected?.id === u.id ? "active" : ""} ${unreadCount > 0 ? "has-unread" : ""}`}
+                onClick={() => setSelected(u)}
+              >
+                <div className="avatar avatar-sm avatar-wrap">
+                  {getInitials(u.email)}
+                  <span
+                    className={`presence-dot ${isOnline ? "online" : "offline"}`}
+                  />
+                </div>
+                <div className="user-item-info">
+                  <div className="user-item-email">{u.email}</div>
+                  <div className="user-item-status">
+                    {unreadCount > 0
+                      ? "nova mensagem"
+                      : isOnline
+                        ? "online"
+                        : "offline"}
+                  </div>
+                </div>
+                {unreadCount > 0 && (
+                  <span className="unread-badge">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
               </div>
             );
           })}
         </div>
       </aside>
 
-      <main className={`chat-area ${selected ? 'mobile-active' : ''}`}>
-        {!selected ? <div className="chat-empty"><div className="chat-empty-icon">💬</div><div className="chat-empty-text">Selecione um usuário para conversar</div></div> : (
+      <main className={`chat-area ${selected ? "mobile-active" : ""}`}>
+        {!selected ? (
+          <div className="chat-empty">
+            <div className="chat-empty-icon">💬</div>
+            <div className="chat-empty-text">
+              Selecione um usuário para conversar
+            </div>
+          </div>
+        ) : (
           <>
             <div className="chat-header">
-              <button className="btn-back-mobile" onClick={() => setSelected(null)}>←</button>
-              <div className="avatar avatar-sm avatar-wrap">{getInitials(selected.email)}<span className={`presence-dot ${online.includes(selected.id) ? 'online' : 'offline'}`} /></div>
-              <div className="chat-header-info"><div className="chat-header-email">{selected.email}</div><div className="chat-header-status">{typingFrom === selected.id ? 'digitando...' : online.includes(selected.id) ? 'online' : 'offline'}</div></div>
-              <button className="btn-clear-chat" onClick={clearConversation} title="Limpar conversa">Limpar</button>
+              <button
+                className="btn-back-mobile"
+                onClick={() => setSelected(null)}
+              >
+                ←
+              </button>
+              <div className="avatar avatar-sm avatar-wrap">
+                {getInitials(selected.email)}
+                <span
+                  className={`presence-dot ${online.includes(selected.id) ? "online" : "offline"}`}
+                />
+              </div>
+              <div className="chat-header-info">
+                <div className="chat-header-email">{selected.email}</div>
+                <div className="chat-header-status">
+                  {typingFrom === selected.id
+                    ? "digitando..."
+                    : online.includes(selected.id)
+                      ? "online"
+                      : "offline"}
+                </div>
+              </div>
+              <button
+                className="btn-clear-chat"
+                onClick={clearConversation}
+                title="Limpar conversa"
+              >
+                Limpar
+              </button>
             </div>
 
             <div className="messages-container">
-              {loadingMsgs && <div style={{ textAlign: 'center', color: 'var(--text-3)', padding: 20 }}><div className="spinner" /></div>}
-              {!loadingMsgs && messagesByDate.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-3)', fontSize: 13, marginTop: 40 }}>Nenhuma mensagem ainda. Diga olá! 👋</div>}
-              {messagesByDate.map(group => <div key={group.date} className="msg-group"><div className="date-divider"><span>{group.date}</span></div>{group.messages.map(msg => {
-                const mine = msg.senderId === user?.id;
-                return <div key={msg.id} className={`msg-wrapper ${mine ? 'mine' : 'theirs'}`}><div className="msg-bubble">{isImageMessage(msg.content) ? <img className="chat-image" src={getImageSrc(msg.content)} alt="Imagem enviada" /> : msg.content}<span className="msg-time">{formatTime(msg.createdAt)}{mine && <span className={`msg-check ${msg.readAt ? 'read' : ''}`}>{msg.failed ? ' ⚠' : msg.pending ? ' …' : msg.readAt ? ' ✔✔' : ' ✔'}</span>}</span></div></div>;
-              })}</div>)}
-              {typingFrom === selected.id && <div className="msg-wrapper theirs"><div className="msg-bubble typing-bubble"><span></span><span></span><span></span></div></div>}
+              {loadingMsgs && (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "var(--text-3)",
+                    padding: 20,
+                  }}
+                >
+                  <div className="spinner" />
+                </div>
+              )}
+              {!loadingMsgs && messagesByDate.length === 0 && (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "var(--text-3)",
+                    fontSize: 13,
+                    marginTop: 40,
+                  }}
+                >
+                  Nenhuma mensagem ainda. Diga olá! 👋
+                </div>
+              )}
+              {messagesByDate.map((group) => (
+                <div key={group.date} className="msg-group">
+                  <div className="date-divider">
+                    <span>{group.date}</span>
+                  </div>
+                  {group.messages.map((msg) => {
+                    const mine = msg.senderId === user?.id;
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`msg-wrapper ${mine ? "mine" : "theirs"}`}
+                      >
+                        <div className="msg-bubble">
+                          {isImageMessage(msg.content) ? (
+                            <img
+                              className="chat-image"
+                              src={getImageSrc(msg.content)}
+                              alt="Imagem enviada"
+                            />
+                          ) : (
+                            msg.content
+                          )}
+                          <span className="msg-time">
+                            {formatTime(msg.createdAt)}
+                            {mine && (
+                              <span
+                                className={`msg-check ${msg.readAt ? "read" : ""}`}
+                              >
+                                {msg.failed
+                                  ? " ⚠"
+                                  : msg.pending
+                                    ? " …"
+                                    : msg.readAt
+                                      ? " ✔✔"
+                                      : " ✔"}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+              {typingFrom === selected.id && (
+                <div className="msg-wrapper theirs">
+                  <div className="msg-bubble typing-bubble">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
 
             <div className="chat-input-area">
-              {imagePreview && <div className="image-preview"><img src={imagePreview} alt="Prévia" /><button onClick={() => setImagePreview(null)}>×</button><button onClick={sendImage}>Enviar imagem</button></div>}
+              {imagePreview && (
+                <div className="image-preview">
+                  <img src={imagePreview} alt="Prévia" />
+                  <button onClick={() => setImagePreview(null)}>×</button>
+                  <button onClick={sendImage}>Enviar imagem</button>
+                </div>
+              )}
               <div className="emoji-wrapper">
-                <button type="button" className="btn-emoji" onClick={() => setShowEmojiPicker(prev => !prev)} title="Emojis">🙂</button>
-                {showEmojiPicker && <div className="emoji-picker">{recentEmojis.length > 0 && <div className="emoji-section-title">Recentes</div>}{recentEmojis.map(emoji => <button key={`recent-${emoji}`} type="button" onClick={() => addEmoji(emoji)}>{emoji}</button>)}<div className="emoji-section-title">Todos</div>{EMOJIS.map(emoji => <button key={emoji} type="button" onClick={() => addEmoji(emoji)}>{emoji}</button>)}<div className="emoji-help">Use também: :smile: :fire: :heart:</div></div>}
+                <button
+                  type="button"
+                  className="btn-emoji"
+                  onClick={() => setShowEmojiPicker((prev) => !prev)}
+                  title="Emojis"
+                >
+                  🙂
+                </button>
+                {showEmojiPicker && (
+                  <div className="emoji-picker">
+                    {recentEmojis.length > 0 && (
+                      <div className="emoji-section-title">Recentes</div>
+                    )}
+                    {recentEmojis.map((emoji) => (
+                      <button
+                        key={`recent-${emoji}`}
+                        type="button"
+                        onClick={() => addEmoji(emoji)}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                    <div className="emoji-section-title">Todos</div>
+                    {EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => addEmoji(emoji)}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                    <div className="emoji-help">
+                      Use também: :smile: :fire: :heart:
+                    </div>
+                  </div>
+                )}
               </div>
-              <button type="button" className="btn-attach" onClick={() => fileInputRef.current?.click()} title="Enviar imagem">📎</button>
-              <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleImageSelect} />
-              <textarea ref={textareaRef} className="chat-input" placeholder="Digite uma mensagem... use :smile:" value={input} onChange={handleInputChange} onKeyDown={handleKeyDown} rows={1} />
-              <button className="btn-send" onClick={sendMessage} disabled={!input.trim()} title="Enviar">➤</button>
+              <button
+                type="button"
+                className="btn-attach"
+                onClick={() => fileInputRef.current?.click()}
+                title="Enviar imagem"
+              >
+                📎
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={handleImageSelect}
+              />
+              <textarea
+                ref={textareaRef}
+                className="chat-input"
+                placeholder="Digite uma mensagem... use :smile:"
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                rows={1}
+              />
+              <button
+                className="btn-send"
+                onClick={sendMessage}
+                disabled={!input.trim()}
+                title="Enviar"
+              >
+                ➤
+              </button>
             </div>
           </>
         )}
